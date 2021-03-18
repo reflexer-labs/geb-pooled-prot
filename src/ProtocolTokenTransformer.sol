@@ -58,7 +58,6 @@ contract ProtocolTokenTransformer {
     }
 
     // --- Math ---
-    uint256 public constant RAY = 10 ** 27;
     uint256 public constant WAD = 10 ** 18;
 
     function multiply(uint x, uint y) internal pure returns (uint z) {
@@ -111,8 +110,9 @@ contract ProtocolTokenTransformer {
         require(wad > 0, "ProtocolTokenTransformer/null-descendant-to-burn");
 
         uint256 price = exitPrice(wad);
-        require(ancestor.transfer(msg.sender, price), "ProtocolTokenTransformer/could-not-transfer-ancestor");
+        require(price > 0, "ProtocolTokenTransformer/null-exit-price");
 
+        require(ancestor.transfer(msg.sender, price), "ProtocolTokenTransformer/could-not-transfer-ancestor");
         descendant.burn(msg.sender, wad);
         emit Exit(msg.sender, price, wad);
     }
