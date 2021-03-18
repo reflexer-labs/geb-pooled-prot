@@ -1,6 +1,7 @@
 pragma solidity 0.6.7;
 
 import "ds-test/test.sol";
+import {DSAuthority} from "ds-auth/auth.sol";
 import {DSDelegateToken} from "ds-token/delegate.sol";
 import {ProtocolTokenAuthority} from "geb-protocol-token-authority/ProtocolTokenAuthority.sol";
 
@@ -36,7 +37,7 @@ contract ProtocolTokenTransformerTest is DSTest {
         authority   = new ProtocolTokenAuthority();
         transformer = new ProtocolTokenTransformer(address(ancestor), address(descendant));
 
-        descendant.setAuthority(address(authority));
+        descendant.setAuthority(DSAuthority(address(authority)));
         descendant.setOwner(address(transformer));
 
         ancestor.mint(address(this), initAmountToMint);
@@ -119,19 +120,80 @@ contract ProtocolTokenTransformerTest is DSTest {
         assertEq(transformer.joinPrice(WAD), WAD);
         assertEq(transformer.exitPrice(WAD), WAD);
     }
-    function test_mint_descendant_join() public {
-
+    function testFail_mint_descendant_join() public {
+        descendant.mint(address(this), 50E18);
+        transformer.join(WAD);
     }
     function test_join_mint_descendant_exit() public {
+        transformer.join(WAD);
+        descendant.mint(address(this), 49E18);
+        transformer.exit(25E18);
 
+        assertEq(descendant.totalSupply(), 25E18);
+        assertEq(transformer.depositedAncestor(), WAD / 2);
+        assertEq(transformer.ancestorPerDescendant(), WAD / 50);
+        assertEq(transformer.descendantPerAncestor(), WAD * 50);
+        assertEq(transformer.joinPrice(WAD), WAD * 50);
+        assertEq(transformer.exitPrice(WAD), WAD / 50);
     }
     function test_join_tiny_amount_exit() public {
+        transformer.join(1);
+        transformer.exit(1);
 
+        assertEq(descendant.totalSupply(), 0);
+        assertEq(transformer.depositedAncestor(), 0);
+        assertEq(transformer.ancestorPerDescendant(), WAD);
+        assertEq(transformer.descendantPerAncestor(), WAD);
+        assertEq(transformer.joinPrice(WAD), WAD);
+        assertEq(transformer.exitPrice(WAD), WAD);
     }
     function test_join_exit_tiny_amount() public {
+        transformer.join(WAD);
+        transformer.exit(1);
 
+        assertEq(descendant.totalSupply(), WAD - 1);
+        assertEq(transformer.depositedAncestor(), WAD - 1);
+        assertEq(transformer.ancestorPerDescendant(), WAD);
+        assertEq(transformer.descendantPerAncestor(), WAD);
+        assertEq(transformer.joinPrice(WAD), WAD);
+        assertEq(transformer.exitPrice(WAD), WAD);
+    }
+    function test_join_descendant_large_mint_exit() public {
+        transformer.join(WAD);
+        descendant.mint(address(this), RAY * WAD);
+
+        // Checks
+        assertEq(descendant.totalSupply(), RAY * WAD + WAD);
+        assertEq(transformer.depositedAncestor(), WAD);
+        assertEq(transformer.ancestorPerDescendant(), 0);
+        assertEq(transformer.descendantPerAncestor(), RAY * WAD + WAD);
+        assertEq(transformer.joinPrice(WAD), RAY * WAD + WAD);
+        assertEq(transformer.exitPrice(WAD), 0);
+
+        // Exit (will not get any ancestor coins)
+        transformer.exit(WAD);
+
+        // Checks
+        assertEq(descendant.totalSupply(), RAY * WAD);
+        assertEq(transformer.depositedAncestor(), WAD);
+        assertEq(transformer.ancestorPerDescendant(), 0);
+        assertEq(transformer.descendantPerAncestor(), RAY * WAD);
+        assertEq(transformer.joinPrice(WAD), RAY * WAD);
+        assertEq(transformer.exitPrice(WAD), 0);
+    }
+    function test_join_descendant_mint_partial_exit() public {
+        transformer.join(WAD);
+        descendant.mint(address(this), WAD);
+
+        uint256 oldDescendantBalance = descendant.balanceOf(address(this));
+        transformer.join(WAD);
+        assertEq(ancestor.balanceOf(address(this)), initAmountToMint - 2E18);
+
+        transformer.exit(descendant.balanceOf(address(this)) - oldDescendantBalance);
+        assertEq(ancestor.balanceOf(address(this)), initAmountToMint - 1E18);
     }
     function testFail_join_cannot_join() public {
-
+        transformer.toggleJoin();
+        transformer.join(WAD);
     }
 }

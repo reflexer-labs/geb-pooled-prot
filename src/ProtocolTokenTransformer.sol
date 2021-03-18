@@ -72,29 +72,53 @@ contract ProtocolTokenTransformer {
     }
 
     // --- Administration ---
+    /*
+    * @notify Switch between allowing and disallowing joins
+    */
     function toggleJoin() external isAuthorized {
         canJoin = !canJoin;
         emit ToggleJoin(canJoin);
     }
 
     // --- Getters ---
+    /*
+    * @notify Return the ancestor token balance for this contract
+    */
     function depositedAncestor() public view returns (uint256) {
         return ancestor.balanceOf(address(this));
     }
+    /*
+    * @notify Returns how many ancestor tokens are offered for one descendant token
+    */
     function ancestorPerDescendant() public view returns (uint256) {
         return descendant.totalSupply() == 0 ? WAD : wdivide(depositedAncestor(), descendant.totalSupply());
     }
+    /*
+    * @notify Returns how many descendant tokens are offered for one ancestor token
+    */
     function descendantPerAncestor() public view returns (uint256) {
         return descendant.totalSupply() == 0 ? WAD : wdivide(descendant.totalSupply(), depositedAncestor());
     }
+    /*
+    * @notify Given a custom amount of ancestor tokens, it returns the corresponding amount of descendant tokens to mint when someone joins
+    * @param wad The amount of ancestor tokens to compute the descendant tokens for
+    */
     function joinPrice(uint256 wad) public view returns (uint256) {
         return wmultiply(wad, descendantPerAncestor());
     }
+    /*
+    * @notify Given a custom amount of descendant tokens, it returns the corresponding amount of ancestor tokens to send when someone exits
+    * @param wad The amount of descendant tokens to compute the ancestor tokens for
+    */
     function exitPrice(uint256 wad) public view returns (uint256) {
         return wmultiply(wad, ancestorPerDescendant());
     }
 
     // --- Core Logic ---
+    /*
+    * @notify Join ancestor tokens in exchange for descendant tokens
+    * @param wad The amount of ancestor tokens to join
+    */
     function join(uint256 wad) public {
         require(canJoin);
         require(wad > 0, "ProtocolTokenTransformer/null-ancestor-to-join");
@@ -106,11 +130,14 @@ contract ProtocolTokenTransformer {
         descendant.mint(msg.sender, price);
         emit Join(msg.sender, price, wad);
     }
+    /*
+    * @notify Burn descendant tokens in exchange for getting ancestor tokens from this contract
+    * @param wad The amount of descendant tokens to exit/burn
+    */
     function exit(uint256 wad) public {
         require(wad > 0, "ProtocolTokenTransformer/null-descendant-to-burn");
 
         uint256 price = exitPrice(wad);
-        require(price > 0, "ProtocolTokenTransformer/null-exit-price");
 
         require(ancestor.transfer(msg.sender, price), "ProtocolTokenTransformer/could-not-transfer-ancestor");
         descendant.burn(msg.sender, wad);
