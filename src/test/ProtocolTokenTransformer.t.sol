@@ -2,6 +2,7 @@ pragma solidity 0.6.7;
 
 import "ds-test/test.sol";
 import {DSDelegateToken} from "ds-token/delegate.sol";
+import {ProtocolTokenAuthority} from "geb-protocol-token-authority/ProtocolTokenAuthority.sol";
 
 import "../ProtocolTokenTransformer.sol";
 
@@ -14,6 +15,8 @@ contract ProtocolTokenTransformerTest is DSTest {
 
     DSDelegateToken ancestor;
     DSDelegateToken descendant;
+
+    ProtocolTokenAuthority authority;
 
     ProtocolTokenTransformer transformer;
 
@@ -30,8 +33,10 @@ contract ProtocolTokenTransformerTest is DSTest {
         ancestor    = new DSDelegateToken("ANC", "ANC");
         descendant  = new DSDelegateToken("DES", "DES");
 
+        authority   = new ProtocolTokenAuthority();
         transformer = new ProtocolTokenTransformer(address(ancestor), address(descendant));
 
+        descendant.setAuthority(address(authority));
         descendant.setOwner(address(transformer));
 
         ancestor.mint(address(this), initAmountToMint);
