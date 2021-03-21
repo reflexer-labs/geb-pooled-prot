@@ -142,6 +142,13 @@ contract TokenTransformerTest is DSTest {
         hevm.warp(now + exitDelay + 1);
         transformer.exit(WAD);
     }
+    function testFail_request_again_during_exit_window() public {
+        transformer.join(WAD);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + exitWindow - 1);
+        transformer.requestExit();
+    }
     function test_join_exit_prefunded() public {
         ancestor.transfer(address(transformer), WAD);
         assertEq(descendant.totalSupply(), 0);
