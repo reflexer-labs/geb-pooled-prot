@@ -5,13 +5,13 @@ import {DSAuthority} from "ds-auth/auth.sol";
 import {DSDelegateToken} from "ds-token/delegate.sol";
 import {ProtocolTokenAuthority} from "geb-protocol-token-authority/ProtocolTokenAuthority.sol";
 
-import "../ProtocolTokenTransformer.sol";
+import "../TokenTransformer.sol";
 
 abstract contract Hevm {
     function warp(uint256) virtual public;
 }
 
-contract ProtocolTokenTransformerTest is DSTest {
+contract TokenTransformerTest is DSTest {
     Hevm hevm;
 
     DSDelegateToken ancestor;
@@ -19,10 +19,16 @@ contract ProtocolTokenTransformerTest is DSTest {
 
     ProtocolTokenAuthority authority;
 
-    ProtocolTokenTransformer transformer;
+    TokenTransformer transformer;
 
     uint256 startTime        = 1577836800;
     uint256 initAmountToMint = 100E18;
+
+    uint256 maxDelay         = 7 days;
+    uint256 minExitWindow    = 1 days;
+    uint256 maxExitWindow    = 2 days;
+    uint256 exitDelay        = 1 days;
+    uint256 exitWindow       = 1 days;
 
     uint256 public constant RAY = 10 ** 27;
     uint256 public constant WAD = 10 ** 18;
@@ -35,7 +41,15 @@ contract ProtocolTokenTransformerTest is DSTest {
         descendant  = new DSDelegateToken("DES", "DES");
 
         authority   = new ProtocolTokenAuthority();
-        transformer = new ProtocolTokenTransformer(address(ancestor), address(descendant));
+        transformer = new TokenTransformer(
+          address(ancestor),
+          address(descendant),
+          maxDelay,
+          minExitWindow,
+          maxExitWindow,
+          exitDelay,
+          exitWindow
+        );
 
         descendant.setAuthority(DSAuthority(address(authority)));
         descendant.setOwner(address(transformer));
@@ -51,6 +65,18 @@ contract ProtocolTokenTransformerTest is DSTest {
         assertEq(transformer.authorizedAccounts(address(this)), 1);
         assertEq(address(transformer.ancestor()), address(ancestor));
         assertEq(address(transformer.descendant()), address(descendant));
+        assertEq(transformer.MAX_DELAY(), maxDelay);
+        assertEq(transformer.MIN_EXIT_WINDOW(), minExitWindow);
+        assertEq(transformer.MAX_EXIT_WINDOW(), maxExitWindow);
+        assertEq(transformer.exitDelay(), exitDelay);
+        assertEq(transformer.exitWindow(), exitWindow);
+    }
+    function test_modifyParameters() public {
+        transformer.modifyParameters("exitDelay", maxDelay - 10);
+        transformer.modifyParameters("exitWindow", maxExitWindow - 10);
+
+        assertEq(transformer.exitDelay(), maxDelay - 10);
+        assertEq(transformer.exitWindow(), maxExitWindow - 10);
     }
     function test_getters_no_interaction() public {
         assertEq(transformer.depositedAncestor(), 0);
@@ -73,6 +99,9 @@ contract ProtocolTokenTransformerTest is DSTest {
     }
     function test_exit_some() public {
         transformer.join(WAD);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(WAD / 2);
 
         assertEq(descendant.totalSupply(), WAD / 2);
@@ -84,6 +113,9 @@ contract ProtocolTokenTransformerTest is DSTest {
     }
     function test_exit_all() public {
         transformer.join(WAD);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(WAD);
 
         assertEq(descendant.totalSupply(), 0);
@@ -92,6 +124,23 @@ contract ProtocolTokenTransformerTest is DSTest {
         assertEq(transformer.descendantPerAncestor(), WAD);
         assertEq(transformer.joinPrice(WAD), WAD);
         assertEq(transformer.exitPrice(WAD), WAD);
+    }
+    function testFail_first_exit_without_request() public {
+        transformer.join(WAD);
+        hevm.warp(now + exitDelay + 1);
+        transformer.exit(WAD);
+    }
+    function testFail_second_exit_without_request() public {
+        transformer.join(WAD);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
+        transformer.exit(WAD);
+        hevm.warp(now + exitWindow);
+
+        transformer.join(WAD);
+        hevm.warp(now + exitDelay + 1);
+        transformer.exit(WAD);
     }
     function test_join_exit_prefunded() public {
         ancestor.transfer(address(transformer), WAD);
@@ -111,8 +160,27 @@ contract ProtocolTokenTransformerTest is DSTest {
         assertEq(transformer.joinPrice(WAD), WAD / 2);
         assertEq(transformer.exitPrice(WAD), WAD * 2);
 
+        transformer.requestExit();
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(WAD);
         assertEq(ancestor.balanceOf(address(this)), initAmountToMint);
+        assertEq(descendant.totalSupply(), 0);
+        assertEq(transformer.depositedAncestor(), 0);
+        assertEq(transformer.ancestorPerDescendant(), WAD);
+        assertEq(transformer.descendantPerAncestor(), WAD);
+        assertEq(transformer.joinPrice(WAD), WAD);
+        assertEq(transformer.exitPrice(WAD), WAD);
+    }
+    function test_exit_in_second_window() public {
+        transformer.join(WAD);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + exitWindow + 1);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
+        transformer.exit(WAD);
+
         assertEq(descendant.totalSupply(), 0);
         assertEq(transformer.depositedAncestor(), 0);
         assertEq(transformer.ancestorPerDescendant(), WAD);
@@ -127,6 +195,9 @@ contract ProtocolTokenTransformerTest is DSTest {
     function test_join_mint_descendant_exit() public {
         transformer.join(WAD);
         descendant.mint(address(this), 49E18);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(25E18);
 
         assertEq(descendant.totalSupply(), 25E18);
@@ -138,6 +209,9 @@ contract ProtocolTokenTransformerTest is DSTest {
     }
     function test_join_tiny_amount_exit() public {
         transformer.join(1);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(1);
 
         assertEq(descendant.totalSupply(), 0);
@@ -149,6 +223,9 @@ contract ProtocolTokenTransformerTest is DSTest {
     }
     function test_join_exit_tiny_amount() public {
         transformer.join(WAD);
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(1);
 
         assertEq(descendant.totalSupply(), WAD - 1);
@@ -171,6 +248,9 @@ contract ProtocolTokenTransformerTest is DSTest {
         assertEq(transformer.exitPrice(WAD), 0);
 
         // Exit (will not get any ancestor coins)
+        transformer.requestExit();
+
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(WAD);
 
         // Checks
@@ -189,6 +269,8 @@ contract ProtocolTokenTransformerTest is DSTest {
         transformer.join(WAD);
         assertEq(ancestor.balanceOf(address(this)), initAmountToMint - 2E18);
 
+        transformer.requestExit();
+        hevm.warp(now + exitDelay + 1);
         transformer.exit(descendant.balanceOf(address(this)) - oldDescendantBalance);
         assertEq(ancestor.balanceOf(address(this)), initAmountToMint - 1E18);
     }
